@@ -26,6 +26,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get('/')
+async def root():
+    """Root endpoint to verify API is running"""
+    return {
+        "message": "Heart Disease Prediction API",
+        "status": "online",
+        "endpoints": {
+            "predict": "/api/predict",
+            "health": "/api/health",
+            "docs": "/docs"
+        }
+    }
+
 # Use paths relative to this script's directory
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(SCRIPT_DIR, "heart_disease_model_final.pth")
