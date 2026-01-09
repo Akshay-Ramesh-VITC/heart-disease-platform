@@ -17,11 +17,12 @@ from datetime import datetime
 
 app = FastAPI(title="Heart Disease Predictor - Production API")
 
-# CORS configuration - allow Netlify frontend and localhost for development
+# CORS configuration - allow frontend and localhost for development
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://predictheartdisease.netlify.app",
+        "https://heart-disease-frontend.onrender.com",  # Add your actual Render frontend URL here
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:3000"
