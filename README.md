@@ -1,26 +1,47 @@
 # Multi-Modal Heart Disease Risk Assessment Platform
 
-AI-powered cardiovascular risk prediction using multi-modal clinical data with a React frontend and FastAPI backend.
+AI-powered cardiovascular risk prediction using:
+- **Multi-modal clinical data** (Framingham-based parameters)
+- **Cardiac imaging analysis** (UNet deep learning for medical images)
+
+React frontend with FastAPI backend supporting both assessment methods.
 
 ## Project Structure
 
 ```
 heart-disease-platform/
-├── predict_api.py          # FastAPI backend with /api/predict endpoint
-├── train_model.py          # PyTorch model training script
+├── predict_api.py          # FastAPI backend with /api/predict and /api/predict-image endpoints
+├── train_model.py          # PyTorch model training script (clinical data)
+├── train_image_model.py    # UNet training script (cardiac imaging)
 ├── run_all.py             # Combined frontend + backend launcher
 ├── main.py                # Alternative main entry point
 ├── frontend/              # React + Vite frontend
 │   ├── src/
 │   │   ├── main.jsx
-│   │   ├── HeartDiseaseAssessment.jsx
+│   │   ├── HeartDiseaseAssessment.jsx  # Includes image upload tab
 │   │   └── index.css
 │   ├── package.json
 │   ├── vite.config.js     # Proxies /api to backend:8000
 │   └── index.html
-├── scalers.pkl            # Generated after training (saved here)
-└── heart_disease_model_final.pth  # Generated after training (saved here)
+├── scalers.pkl            # Feature scalers (generated after clinical model training)
+├── heart_disease_model_final.pth  # Clinical data model (generated after training)
+├── best_cardiac_model.pth        # Cardiac imaging model (generated after image training)
+└── framingham.csv         # Training dataset for clinical model
 ```
+
+## Features
+
+### 1. Clinical Data Analysis
+- Multi-modal neural network for structured health data
+- Analyzes demographics, cardiovascular, metabolic, and lab parameters
+- Provides modality-specific risk contributions
+- Personalized health recommendations
+
+### 2. Cardiac Imaging Analysis
+- UNet-based deep learning for cardiac image segmentation
+- Upload cardiac scans (X-ray, CT, MRI, ultrasound)
+- Automated structural analysis and risk assessment
+- Segmentation-based disease probability calculation
 
 ## Setup
 
@@ -43,11 +64,12 @@ conda activate heart-disease
 conda install pytorch torchvision torchaudio cpuonly -c pytorch
 
 # Install other dependencies
-pip install fastapi uvicorn pydantic numpy pandas scikit-learn matplotlib seaborn
+pip install fastapi uvicorn pydantic numpy pandas scikit-learn matplotlib seaborn opencv-python pillow python-multipart
 ```
 
-2. **Train the model (optional - will use demo fallback if skipped):**
+2. **Train the models (optional):**
 
+**Clinical Data Model:**
 ```bash
 python train_model.py
 ```
@@ -57,6 +79,15 @@ This will generate:
 - `heart_disease_model_final.pth` - Trained model weights
 - `best_model.pth` - Best checkpoint during training
 - `training_history.png` - Training curves
+
+**Cardiac Imaging Model:**
+```bash
+python train_image_model.py
+```
+
+This will generate:
+- `best_cardiac_model.pth` - Trained UNet model for cardiac image analysis
+- `final_cardiac_model.pth` - Final model checkpoint
 
 ### Frontend Setup
 
@@ -127,10 +158,12 @@ Open `http://127.0.0.1:3000` in your browser.
   {
     "status": "healthy",
     "model_loaded": true,
+    "image_model_loaded": true,
     "timestamp": "2025-12-23T..."
   }
   ```
-- `POST /api/predict` - Heart disease risk prediction
+
+- `POST /api/predict` - Heart disease risk prediction from clinical data
   
   **Request body:**
   ```json
@@ -163,6 +196,7 @@ Open `http://127.0.0.1:3000` in your browser.
   ```json
   {
     "probability": 0.234,
+    "risk_category": "Low",
     "modalities": {
       "cardiovascular": 0.093,
       "metabolic": 0.082,
@@ -173,7 +207,41 @@ Open `http://127.0.0.1:3000` in your browser.
       {"name": "systolic_bp", "value": 10},
       {"name": "ldl", "value": 20},
       ...
-    ]
+    ],
+    "recommendations": [...]
+  }
+  ```
+
+- `POST /api/predict-image` - Heart disease risk prediction from cardiac imaging
+  
+  **Request:**
+  - Multipart form data
+  - Field name: `file`
+  - Accepted formats: PNG, JPG, JPEG, etc.
+  
+  **Example using curl:**
+  ```bash
+  curl -X POST http://127.0.0.1:8000/api/predict-image \
+    -F "file=@cardiac_scan.jpg"
+  ```
+
+  **Response:**
+  ```json
+  {
+    "probability": 0.65,
+    "risk_probability": 0.65,
+    "risk_category": "Medium",
+    "predicted_class": 1,
+    "num_classes": 2,
+    "analysis_type": "cardiac_imaging",
+    "recommendations": [
+      "Cardiac imaging shows structural analysis completed",
+      "MODERATE RISK indicated in cardiac imaging",
+      "Schedule follow-up cardiac imaging and consultation",
+      "Monitor cardiac symptoms closely"
+    ],
+    "timestamp": "2025-01-15T...",
+    "message": "Image analyzed using 2-class segmentation model"
   }
   ```
 

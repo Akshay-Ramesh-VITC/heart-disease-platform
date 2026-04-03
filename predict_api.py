@@ -3,10 +3,11 @@
 Requires:
 - heart_disease_model_final.pth (trained PyTorch model)
 - scalers.pkl (fitted StandardScalers for each modality)
+- best_cardiac_model.pth (trained image-based cardiac model)
 
 Use train_model.py to generate these files if they don't exist.
 """
-from fastapi import FastAPI, Response, HTTPException
+from fastapi import FastAPI, Response, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict
@@ -14,6 +15,12 @@ import numpy as np
 import os
 import pickle
 from datetime import datetime
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import cv2
+from PIL import Image
+import io
 
 app = FastAPI(title="Heart Disease Predictor - Production API")
 
@@ -32,9 +39,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get('/')
+@app.get('/api')
+@app.get('/api/')
 async def root():
-    """Root endpoint to verify API is running"""
+    """API info endpoint to verify API is running"""
     return {
         "message": "Heart Disease Prediction API",
         "status": "online",
@@ -49,6 +57,73 @@ async def root():
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(SCRIPT_DIR, "heart_disease_model_final.pth")
 SCALERS_PATH = os.path.join(SCRIPT_DIR, "scalers.pkl")
+IMAGE_MODEL_PATH = os.path.join(SCRIPT_DIR, "best_cardiac_model.pth")
+
+# UNet Architecture for Image Analysis
+class DoubleConv(nn.Module):
+    def __init__(self, in_ch, out_ch):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, 3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_ch, out_ch, 3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True)
+        )
+    
+    def forward(self, x):
+        return self.conv(x)
+
+
+class UNet(nn.Module):
+    def __init__(self, n_channels=1, n_classes=4):
+        super().__init__()
+        self.n_channels = n_channels
+        self.n_classes = n_classes
+        
+        self.inc = DoubleConv(n_channels, 64)
+        self.down1 = nn.Sequential(nn.MaxPool2d(2), DoubleConv(64, 128))
+        self.down2 = nn.Sequential(nn.MaxPool2d(2), DoubleConv(128, 256))
+        self.down3 = nn.Sequential(nn.MaxPool2d(2), DoubleConv(256, 512))
+        self.down4 = nn.Sequential(nn.MaxPool2d(2), DoubleConv(512, 512))
+        
+        self.up1 = nn.ConvTranspose2d(512, 512, 2, stride=2)
+        self.conv1 = DoubleConv(1024, 256)
+        self.up2 = nn.ConvTranspose2d(256, 256, 2, stride=2)
+        self.conv2 = DoubleConv(512, 128)
+        self.up3 = nn.ConvTranspose2d(128, 128, 2, stride=2)
+        self.conv3 = DoubleConv(256, 64)
+        self.up4 = nn.ConvTranspose2d(64, 64, 2, stride=2)
+        self.conv4 = DoubleConv(128, 64)
+        
+        self.outc = nn.Conv2d(64, n_classes, 1)
+    
+    def forward(self, x):
+        x1 = self.inc(x)
+        x2 = self.down1(x1)
+        x3 = self.down2(x2)
+        x4 = self.down3(x3)
+        x5 = self.down4(x4)
+        
+        x = self.up1(x5)
+        x = torch.cat([x, x4], dim=1)
+        x = self.conv1(x)
+        
+        x = self.up2(x)
+        x = torch.cat([x, x3], dim=1)
+        x = self.conv2(x)
+        
+        x = self.up3(x)
+        x = torch.cat([x, x2], dim=1)
+        x = self.conv3(x)
+        
+        x = self.up4(x)
+        x = torch.cat([x, x1], dim=1)
+        x = self.conv4(x)
+        
+        return self.outc(x)
+
 
 # Define input schema (covers modalities used in frontend)
 class PatientInput(BaseModel):
@@ -73,6 +148,7 @@ class PatientInput(BaseModel):
     smoking: Optional[int] = 0
     physical_activity: Optional[str] = 'moderate'  # 'sedentary', 'light', 'moderate', 'active', 'very_active'
     family_history: Optional[int] = 0
+    image_risk_score: Optional[float] = None  # Optional cardiac imaging risk score
 
 
 def generate_recommendations(data: Dict, prob: float, modalities: Dict) -> List[str]:
@@ -227,6 +303,17 @@ async def predict(payload: PatientInput):
             prob = float(final_pred.detach().cpu().flatten()[0].item())
             modalities = {k: float(v.detach().cpu().flatten()[0].item()) for k,v in modal_outputs.items()}
 
+        # If image risk score is provided, combine it with clinical predictions
+        image_risk = data.get('image_risk_score')
+        if image_risk is not None:
+            # Add imaging modality score
+            modalities['imaging'] = float(image_risk)
+            # Combine clinical and imaging risk (weighted average: 60% clinical, 40% imaging)
+            prob = 0.6 * prob + 0.4 * float(image_risk)
+            analysis_type = 'combined'
+        else:
+            analysis_type = 'clinical'
+
         # Feature importance: absolute deviation from healthy reference values
         refs = {'systolic_bp':120,'diastolic_bp':80,'ldl':100,'hdl':50,'age':50,'potassium':4.0,'egfr':90,'fasting_glucose':95}
         feats = []
@@ -259,6 +346,7 @@ async def predict(payload: PatientInput):
             'modal_scores': modalities,  # Alias for compatibility
             'feature_importance': feats,
             'recommendations': recommendations,
+            'analysis_type': analysis_type,  # 'clinical', 'combined', or 'cardiac_imaging'
             'timestamp': datetime.now().isoformat()
         }
 
@@ -269,11 +357,128 @@ async def predict(payload: PatientInput):
         )
 
 
+@app.post('/api/predict-image')
+async def predict_image(file: UploadFile = File(...)):
+    """Predict heart disease risk from cardiac image using UNet model"""
+    
+    if not os.path.exists(IMAGE_MODEL_PATH):
+        raise HTTPException(
+            status_code=500,
+            detail=f"Image model not found at {IMAGE_MODEL_PATH}. Please train the model first using train_image_model.py"
+        )
+    
+    try:
+        # Read and preprocess image
+        contents = await file.read()
+        
+        # Convert to PIL Image
+        pil_image = Image.open(io.BytesIO(contents))
+        
+        # Convert to grayscale numpy array
+        img_array = np.array(pil_image.convert('L'))
+        
+        # Resize to 256x256 (model input size)
+        img_resized = cv2.resize(img_array, (256, 256))
+        
+        # Normalize to [0, 1]
+        img_normalized = img_resized.astype(np.float32) / 255.0
+        
+        # Convert to tensor with correct shape: (batch, channels, height, width)
+        img_tensor = torch.FloatTensor(img_normalized).unsqueeze(0).unsqueeze(0)
+        
+        # Load model checkpoint
+        checkpoint = torch.load(IMAGE_MODEL_PATH, map_location='cpu')
+        num_classes = checkpoint.get('num_classes', 2)
+        
+        # Initialize and load model
+        model = UNet(n_channels=1, n_classes=num_classes)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.eval()
+        
+        # Run inference
+        with torch.no_grad():
+            output = model(img_tensor)
+            probs = F.softmax(output, dim=1)
+            
+            # For segmentation output: [batch, classes, height, width]
+            # Calculate disease probability based on segmentation mask
+            pred_mask = torch.argmax(probs, dim=1).squeeze().cpu().numpy()  # [H, W]
+            
+            # Get the most common predicted class
+            unique_classes, counts = np.unique(pred_mask, return_counts=True)
+            pred_class = int(unique_classes[np.argmax(counts)])
+            
+            # Calculate disease probability based on abnormal region percentage
+            if num_classes == 2:
+                # Binary: calculate percentage of diseased pixels (class 1)
+                disease_pixels = np.sum(pred_mask == 1)
+                total_pixels = pred_mask.size
+                disease_prob = float(disease_pixels / total_pixels)
+            else:
+                # Multi-class: abnormal classes are > 0
+                total_pixels = pred_mask.size
+                abnormal_pixels = np.sum(pred_mask > 0)
+                disease_prob = min(1.0, float(abnormal_pixels / total_pixels))
+        
+        # Determine risk category
+        if disease_prob < 0.3:
+            risk_category = 'Low'
+        elif disease_prob < 0.7:
+            risk_category = 'Medium'
+        else:
+            risk_category = 'High'
+        
+        # Generate recommendations based on image analysis
+        recommendations = [
+            "Cardiac imaging shows structural analysis completed",
+        ]
+        
+        if disease_prob > 0.7:
+            recommendations.extend([
+                "HIGH RISK detected in cardiac imaging",
+                "Immediate consultation with a cardiologist is recommended",
+                "Consider comprehensive cardiac evaluation including ECG and echocardiogram"
+            ])
+        elif disease_prob > 0.4:
+            recommendations.extend([
+                "MODERATE RISK indicated in cardiac imaging",
+                "Schedule follow-up cardiac imaging and consultation",
+                "Monitor cardiac symptoms closely"
+            ])
+        else:
+            recommendations.extend([
+                "LOW RISK indicated in current cardiac imaging",
+                "Continue regular health monitoring",
+                "Maintain heart-healthy lifestyle habits"
+            ])
+        
+        return {
+            'probability': disease_prob,
+            'risk_probability': disease_prob,
+            'risk_category': risk_category,
+            'predicted_class': int(pred_class),
+            'num_classes': num_classes,
+            'analysis_type': 'cardiac_imaging',
+            'modalities': {'imaging': disease_prob},  # Add modality score for consistency
+            'feature_importance': [],  # Empty for image-based prediction
+            'recommendations': recommendations,
+            'timestamp': datetime.now().isoformat(),
+            'message': f'Image analyzed using {num_classes}-class segmentation model'
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Image prediction failed: {str(e)}"
+        )
+
+
 @app.get('/api/health')
 async def health_check():
     return {
         "status": "healthy",
         "model_loaded": os.path.exists(MODEL_PATH),
+        "image_model_loaded": os.path.exists(IMAGE_MODEL_PATH),
         "timestamp": datetime.now().isoformat()
     }
 

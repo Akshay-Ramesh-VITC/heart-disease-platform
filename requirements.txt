@@ -1,10 +1,187 @@
-fastapi==0.115.0
-uvicorn[standard]==0.32.0
-torch==2.5.1
-numpy==2.1.0
-pandas==2.2.3
-scikit-learn==1.5.2
-pydantic==2.10.3
-python-multipart==0.0.12
-matplotlib==3.9.0
-seaborn==0.13.2
+# Heart Disease Platform - Installation Requirements
+
+## Backend Dependencies
+
+### Core Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+### Machine Learning
+torch>=2.0.0
+torchvision>=0.15.0
+scikit-learn>=1.3.0
+numpy>=1.24.0
+pandas>=2.0.0
+
+### Image Processing
+opencv-python>=4.8.0
+Pillow>=10.0.0
+
+### Utilities
+pydantic>=2.0.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+tqdm>=4.65.0
+
+## Installation Instructions
+
+### Option 1: Using pip
+```bash
+pip install -r requirements.txt
+```
+
+### Option 2: Using conda (recommended)
+```bash
+# Create environment
+conda create -n heart-disease python=3.11 -y
+conda activate heart-disease
+
+# Install PyTorch (CPU version)
+conda install pytorch torchvision torchaudio cpuonly -c pytorch -y
+
+# Install other packages
+pip install fastapi uvicorn[standard] python-multipart pydantic
+pip install scikit-learn numpy pandas matplotlib seaborn tqdm
+pip install opencv-python Pillow
+```
+
+### Option 3: Using conda (GPU version)
+```bash
+# Create environment
+conda create -n heart-disease python=3.11 -y
+conda activate heart-disease
+
+# Install PyTorch with CUDA support
+conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia -y
+
+# Install other packages
+pip install fastapi uvicorn[standard] python-multipart pydantic
+pip install scikit-learn numpy pandas matplotlib seaborn tqdm
+pip install opencv-python Pillow
+```
+
+## Frontend Dependencies
+
+Navigate to the frontend folder and install:
+
+```bash
+cd frontend
+npm install
+```
+
+This will install:
+- react
+- react-dom
+- vite
+- And other dependencies from package.json
+
+## Verification
+
+After installation, verify everything is working:
+
+```bash
+# Activate environment
+conda activate heart-disease  # or source venv/bin/activate
+
+# Test imports
+python -c "import torch; import cv2; import fastapi; print('✓ All imports successful')"
+
+# Check PyTorch
+python -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
+
+# Test frontend
+cd frontend
+npm run build
+```
+
+## Post-Installation
+
+### 1. Train Models (if needed)
+
+```bash
+# Clinical data model
+python train_model.py
+
+# Cardiac imaging model (requires dataset)
+python train_image_model.py
+```
+
+### 2. Verify Model Files
+
+Ensure these files exist:
+- `heart_disease_model_final.pth`
+- `best_cardiac_model.pth`
+- `scalers.pkl`
+- `framingham.csv`
+
+### 3. Test Endpoints
+
+```bash
+# Start backend
+python predict_api.py
+
+# In another terminal, run tests
+python test_endpoints.py
+
+# Test with an image
+python test_endpoints.py --image path/to/cardiac_image.jpg
+```
+
+## Common Issues
+
+### Issue: ModuleNotFoundError for cv2
+**Solution:**
+```bash
+pip install opencv-python
+```
+
+### Issue: ModuleNotFoundError for PIL
+**Solution:**
+```bash
+pip install Pillow
+```
+
+### Issue: ModuleNotFoundError for multipart
+**Solution:**
+```bash
+pip install python-multipart
+```
+
+### Issue: CUDA out of memory
+**Solution:** Use CPU version or reduce batch size in training scripts
+
+### Issue: Model file not found
+**Solution:** Ensure you've run the training scripts or download pre-trained models
+
+## System Requirements
+
+### Minimum:
+- Python 3.8+
+- 4GB RAM
+- 2GB disk space
+
+### Recommended:
+- Python 3.11
+- 8GB+ RAM
+- 5GB+ disk space
+- GPU with 4GB+ VRAM (for training)
+
+## Platform Support
+
+- ✓ Windows 10/11
+- ✓ macOS 10.15+
+- ✓ Linux (Ubuntu 20.04+, etc.)
+
+## Development vs. Production
+
+### Development:
+- Use `python run_all.py` for local testing
+- Frontend runs on Vite dev server (hot reload)
+- Backend runs with uvicorn reload
+
+### Production:
+- Build frontend: `cd frontend && npm run build`
+- Deploy backend with proper ASGI server
+- Use environment variables for configuration
+- Consider using Docker for containerization
