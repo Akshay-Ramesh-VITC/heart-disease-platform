@@ -5,6 +5,8 @@ export default function HeartDiseaseAssessment(){
   const [loading, setLoading] = useState(false)
   const [prediction, setPrediction] = useState(null)
   const [error, setError] = useState(null)
+  const [imageFile, setImageFile] = useState(null)
+  const [imagePreview, setImagePreview] = useState(null)
   const [formData, setFormData] = useState({
     age:55, sex:'male', bmi:27,
     systolic_bp:130, diastolic_bp:80, heart_rate:75, prevalent_hypertension:0,
@@ -18,10 +20,67 @@ export default function HeartDiseaseAssessment(){
     setFormData(prev=>({...prev, [name]: type==='checkbox' ? (checked?1:0) : (type==='number'? Number(value): value)}))
   }
 
+  const handleImageChange = (e) => {
+    const file = e.target.files[0]
+    if (file) {
+      setImageFile(file)
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        setImagePreview(reader.result)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
+  const handleImageSubmit = async () => {
+    if (!imageFile) {
+      setError('Please select an image file')
+      return
+    }
+
+    setLoading(true); setError(null); setPrediction(null)
+    const backendBase = import.meta.env.VITE_API_URL || '';
+
+    try{
+      const formDataImg = new FormData()
+      formDataImg.append('file', imageFile)
+
+      console.log('Calling API:', `${backendBase}/api/predict-image`);
+      const res = await fetch(`${backendBase}/api/predict-image`, {
+        method:'POST',
+        body: formDataImg
+      })
+      console.log('Response status:', res.status);
+      
+      const responseText = await res.text();
+      console.log('Response text:', responseText);
+      
+      if(!res.ok){
+        let errText = 'Image prediction failed';
+        try{ 
+          const errJson = JSON.parse(responseText); 
+          errText = errJson.detail || errText 
+        } catch(e){ 
+          errText = responseText || errText 
+        }
+        throw new Error(errText)
+      }
+      
+      const json = JSON.parse(responseText);
+      console.log('Image prediction response:', json);
+      setPrediction(json)
+      console.log('Prediction state set, should render now');
+    }catch(err){ 
+      console.error('Error:', err);
+      setError(err.message) 
+    }
+    finally{ setLoading(false) }
+  }
+
   const handleSubmit = async () => {
     setLoading(true); setError(null); setPrediction(null)
-    // Use environment variable for API URL, or production Render URL
-    const backendBase = import.meta.env.VITE_API_URL || 'https://heart-disease-platform.onrender.com';
+    // Use environment variable for API URL, default to relative path for proxy
+    const backendBase = import.meta.env.VITE_API_URL || '';
 
     try{
       console.log('Calling API:', `${backendBase}/api/predict`);
@@ -59,7 +118,8 @@ export default function HeartDiseaseAssessment(){
     {id:'demographics', label:'Demographics'},
     {id:'cardiovascular', label:'Cardiovascular'},
     {id:'metabolic', label:'Metabolic'},
-    {id:'labs', label:'Lab Results'}
+    {id:'labs', label:'Lab Results'},
+    {id:'imaging', label:'Cardiac Imaging'}
   ]
 
   return (
@@ -142,24 +202,65 @@ export default function HeartDiseaseAssessment(){
                   <input type="number" name="egfr" value={formData.egfr} onChange={handleInputChange} className="w-full border rounded px-3 py-2"/></div>
               </div>
             )}
+
+            {activeTab==='imaging'&&(
+              <div className="space-y-4">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <h3 className="font-semibold text-blue-900 mb-2">Upload Cardiac Image</h3>
+                  <p className="text-sm text-blue-700 mb-4">Upload a cardiac imaging scan (X-ray, CT, MRI, etc.) for AI-powered analysis.</p>
+                  
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    onChange={handleImageChange}
+                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                  />
+                </div>
+
+                {imagePreview && (
+                  <div className="border rounded-lg p-4">
+                    <h4 className="font-medium mb-2">Image Preview:</h4>
+                    <img src={imagePreview} alt="Cardiac scan preview" className="max-w-md mx-auto rounded shadow" />
+                  </div>
+                )}
+
+                <div className="text-center">
+                  <button 
+                    onClick={handleImageSubmit} 
+                    disabled={loading || !imageFile}
+                    className="bg-green-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-green-700 disabled:opacity-50"
+                  >
+                    {loading ? 'Analyzing Image...' : 'Analyze Cardiac Image'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Submit Button */}
-        <div className="text-center mb-6">
-          <button onClick={handleSubmit} disabled={loading} 
+        {/* Submit Button (for non-imaging tabs) */}
+        {activeTab !== 'imaging' && (
+          <div className="text-center mb-6">
+            <button onClick={handleSubmit} disabled={loading} 
             className="bg-blue-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50">
             {loading?'Analyzing...':'Assess Risk'}
           </button>
-        </div>
-
-        {/* Error */}
-        {error&&<div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">{error}</div>}
+          </div>
+        )}
 
         {/* Results */}
         {prediction&&(
           <div className="bg-white rounded-lg shadow-md p-6">
             <h2 className="text-2xl font-bold mb-4">Risk Assessment Results</h2>
+            
+            {/* Analysis Type Badge */}
+            {prediction.analysis_type && (
+              <div className="mb-4">
+                <span className="inline-block px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-medium">
+                  {prediction.analysis_type === 'cardiac_imaging' ? '🔬 Cardiac Imaging Analysis' : '📊 Clinical Data Analysis'}
+                </span>
+              </div>
+            )}
             
             {/* Risk Level with Category */}
             <div className="mb-6">
