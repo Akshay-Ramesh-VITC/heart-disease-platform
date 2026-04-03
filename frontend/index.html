@@ -1,16 +1,4 @@
 <!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Heart Disease Frontend</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
-</html>
-<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -53,12 +41,17 @@
       const Activity = (props) => (
         <Icon {...props}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></Icon>
       );
+      const ImageIcon = (props) => (
+        <Icon {...props}><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></Icon>
+      );
 
       function HeartDiseaseAssessment(){
         const [activeTab, setActiveTab] = useState('demographics');
         const [loading, setLoading] = useState(false);
         const [prediction, setPrediction] = useState(null);
         const [error, setError] = useState(null);
+        const [imageFile, setImageFile] = useState(null);
+        const [imagePreview, setImagePreview] = useState(null);
         const [formData, setFormData] = useState({
           age: 55, sex: 'male', bmi: 27,
           systolic_bp: 130, diastolic_bp: 80, heart_rate: 75, prevalent_hypertension: 0,
@@ -72,10 +65,52 @@
           setFormData(prev => ({...prev, [name]: type === 'checkbox' ? (checked ? 1 : 0) : (type==='number'? Number(value): value)}));
         };
 
+        const handleImageChange = (e) => {
+          const file = e.target.files[0];
+          if (file) {
+            setImageFile(file);
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              setImagePreview(reader.result);
+            };
+            reader.readAsDataURL(file);
+          }
+        };
+
+        const handleImageSubmit = async () => {
+          if (!imageFile) {
+            setError('Please select an image file');
+            return;
+          }
+          setLoading(true); setError(null); setPrediction(null);
+          try{
+            const imgFormData = new FormData();
+            imgFormData.append('file', imageFile);
+            const imgRes = await fetch('/api/predict-image', {method:'POST', body: imgFormData});
+            if(!imgRes.ok){ const err = await imgRes.json(); throw new Error(err.detail || 'Image prediction failed'); }
+            const imgJson = await imgRes.json();
+            setPrediction(imgJson);
+          }catch(err){ setError(err.message); }
+          finally{ setLoading(false); }
+        };
+
         const handleSubmit = async () => {
           setLoading(true); setError(null); setPrediction(null);
           try{
-            const res = await fetch('/api/predict', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(formData)});
+            let clinicalData = {...formData};
+            
+            // If image is uploaded, get image prediction first and combine
+            if (imageFile) {
+              const imgFormData = new FormData();
+              imgFormData.append('file', imageFile);
+              const imgRes = await fetch('/api/predict-image', {method:'POST', body: imgFormData});
+              if(!imgRes.ok){ const err = await imgRes.json(); throw new Error(err.detail || 'Image prediction failed'); }
+              const imgJson = await imgRes.json();
+              // Add image risk score to clinical data for combined prediction
+              clinicalData.image_risk_score = imgJson.risk_probability;
+            }
+            
+            const res = await fetch('/api/predict', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(clinicalData)});
             if(!res.ok){ const err = await res.json(); throw new Error(err.detail || 'Prediction failed'); }
             const json = await res.json(); setPrediction(json);
           }catch(err){ setError(err.message); }
@@ -99,7 +134,7 @@
               <div className="lg:col-span-2">
                 <div className="bg-white rounded-lg shadow-lg p-6">
                   <div className="flex border-b mb-6 overflow-x-auto">
-                    {[{id:'demographics',icon:User,label:'Demographics'},{id:'cardiovascular',icon:Activity,label:'Cardiovascular'},{id:'metabolic',icon:Activity,label:'Metabolic'},{id:'labs',icon:Activity,label:'Labs'}].map(tab=> (
+                    {[{id:'demographics',icon:User,label:'Demographics'},{id:'cardiovascular',icon:Activity,label:'Cardiovascular'},{id:'metabolic',icon:Activity,label:'Metabolic'},{id:'labs',icon:Activity,label:'Labs'},{id:'imaging',icon:ImageIcon,label:'Cardiac Imaging'}].map(tab=> (
                       <button key={tab.id} onClick={()=>setActiveTab(tab.id)} className={`flex items-center gap-2 px-4 py-3 font-medium whitespace-nowrap ${activeTab===tab.id? 'border-b-2 border-blue-500 text-blue-600':'text-gray-500 hover:text-gray-700'}`}>
                         <tab.icon className="w-4 h-4" />
                         {tab.label}
@@ -227,12 +262,38 @@
                     </div>
                   )}
 
-                  <div className="mt-6 pt-6 border-t">
-                    <button onClick={handleSubmit} disabled={loading} className="w-full bg-blue-600 text-white py-3 rounded-md flex items-center justify-center gap-2">
-                      {loading ? <div className="animate-spin h-5 w-5 border-b-2 border-white rounded-full"/> : <BarChart3 className="w-5 h-5"/>}
-                      {loading ? 'Analyzing...' : 'Assess Risk'}
-                    </button>
-                  </div>
+                  {activeTab==='imaging' && (
+                    <div className="space-y-4">
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <h3 className="font-semibold text-blue-900 mb-2">Upload Cardiac Image</h3>
+                        <p className="text-sm text-blue-700 mb-4">Upload a cardiac imaging scan (X-ray, CT, MRI, etc.) for AI-powered analysis.</p>
+                        <input type="file" accept="image/*" onChange={handleImageChange} className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+                      </div>
+                      {imagePreview && (
+                        <div className="border rounded-lg p-4">
+                          <h4 className="font-medium mb-2">Image Preview:</h4>
+                          <img src={imagePreview} alt="Cardiac scan preview" className="max-w-md mx-auto rounded shadow" />
+                        </div>
+                      )}
+                      <div className="text-center">
+                        <button onClick={handleImageSubmit} disabled={loading || !imageFile} className="bg-green-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                          {loading ? 'Analyzing Image...' : 'Analyze Cardiac Image'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {activeTab !== 'imaging' && (
+                    <div className="mt-6 pt-6 border-t">
+                      <button onClick={handleSubmit} disabled={loading} className="w-full bg-blue-600 text-white py-3 rounded-md flex items-center justify-center gap-2">
+                        {loading ? <div className="animate-spin h-5 w-5 border-b-2 border-white rounded-full"/> : <BarChart3 className="w-5 h-5"/>}
+                        {loading ? 'Analyzing...' : (imageFile ? 'Assess Risk (Combined with Image)' : 'Assess Risk')}
+                      </button>
+                      {imageFile && (
+                        <p className="text-sm text-green-600 text-center mt-2">✓ Cardiac image will be included in analysis</p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -266,28 +327,39 @@
                         </div>
                         <div className={`text-lg font-semibold mt-2 ${getRiskColor(prediction.risk_probability*100)}`}>{getRiskLabel(prediction.risk_probability*100)}</div>
                         <p className="text-sm text-gray-600 mt-2">{prediction.risk_category}</p>
+                        {prediction.analysis_type && (
+                          <div className="mt-3">
+                            <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${prediction.analysis_type === 'cardiac_imaging' ? 'bg-purple-100 text-purple-800' : prediction.analysis_type === 'combined' ? 'bg-indigo-100 text-indigo-800' : 'bg-blue-100 text-blue-800'}`}>
+                              {prediction.analysis_type === 'cardiac_imaging' ? '🔬 Cardiac Imaging Analysis' : prediction.analysis_type === 'combined' ? '🔬📊 Combined Multi-Modal Analysis' : '📊 Clinical Data Analysis'}
+                            </span>
+                          </div>
+                        )}
                       </div>
 
-                      <div>
-                        <h3 className="font-semibold text-gray-700 text-sm">Modal Risk Scores</h3>
-                        <div className="space-y-3 mt-2">
-                          {Object.entries(prediction.modal_scores).map(([k,v])=> (
-                            <div key={k}>
-                              <div className="flex justify-between text-sm mb-1"><span className="capitalize text-gray-600">{k}</span><span className="font-medium">{(v*100).toFixed(1)}%</span></div>
-                              <div className="w-full bg-gray-200 rounded-full h-2"><div className={`h-2 rounded-full ${v<0.3? 'bg-green-500': v<0.7? 'bg-yellow-500':'bg-red-500'}`} style={{width:`${v*100}%`}}/></div>
-                            </div>
-                          ))}
+                      {(prediction.modal_scores || prediction.modalities) && (
+                        <div>
+                          <h3 className="font-semibold text-gray-700 text-sm">Modal Risk Scores</h3>
+                          <div className="space-y-3 mt-2">
+                            {Object.entries(prediction.modal_scores || prediction.modalities || {}).map(([k,v])=> (
+                              <div key={k}>
+                                <div className="flex justify-between text-sm mb-1"><span className="capitalize text-gray-600">{k}</span><span className="font-medium">{(v*100).toFixed(1)}%</span></div>
+                                <div className="w-full bg-gray-200 rounded-full h-2"><div className={`h-2 rounded-full ${v<0.3? 'bg-green-500': v<0.7? 'bg-yellow-500':'bg-red-500'}`} style={{width:`${v*100}%`}}/></div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                      </div>
+                      )}
 
-                      <div>
-                        <h3 className="font-semibold text-gray-700 text-sm mb-3">Top Contributing Factors</h3>
-                        <div className="space-y-2">
-                          {prediction.feature_importance.slice(0,5).map((it,idx)=> (
-                            <div key={idx} className="flex items-center gap-2"><div className="w-2 h-2 bg-blue-500 rounded-full"/><span className="text-sm text-gray-700">{it.feature || it.name}</span><span className="text-xs text-gray-500 ml-auto">{((it.importance||it.value||0)*100).toFixed(1)}%</span></div>
-                          ))}
+                      {prediction.feature_importance && prediction.feature_importance.length > 0 && (
+                        <div>
+                          <h3 className="font-semibold text-gray-700 text-sm mb-3">Top Contributing Factors</h3>
+                          <div className="space-y-2">
+                            {prediction.feature_importance.slice(0,5).map((it,idx)=> (
+                              <div key={idx} className="flex items-center gap-2"><div className="w-2 h-2 bg-blue-500 rounded-full"/><span className="text-sm text-gray-700">{it.feature || it.name}</span><span className="text-xs text-gray-500 ml-auto">{((it.importance||it.value||0)*100).toFixed(1)}%</span></div>
+                            ))}
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       {prediction.recommendations && prediction.recommendations.length>0 && (
                         <div className="bg-blue-50 rounded-md p-4">
