@@ -336,17 +336,3 @@ gunicorn predict_api:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000
 ```bash
 python run_all.py
 ```
-
-## License
-
-This is a demo project for educational and research purposes.
-
-## Notes
-
-**⚠️ This is a demonstration project using synthetic data and should NOT be used for clinical decision-making without:**
-- Validation on real clinical datasets
-- Regulatory approval (FDA, CE marking, etc.)
-- Clinical expert review
-- IRB/ethics approval
-- Proper PHI handling and security measures
-- Continuous monitoring and performance evaluation
